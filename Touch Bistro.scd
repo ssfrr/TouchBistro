@@ -2,10 +2,7 @@ s.boot
 s.quit
 
 (
-OSCdef(\slider, {
-    | msg |
-    msg.postln;
-}, '/manta/continuous/slider', recvPort: ~defaultRecvPort);
+
 
 OSCdef(\button, {
     | msg |
@@ -29,6 +26,22 @@ The top two buttons allow you to switch between the pattern editor page and the 
 ~oscSender = NetAddr("localhost", 31417);
 ~oscSender.sendMsg('/manta/ledcontrol', "padandbutton", 1);
 
+// a synth to test with
+(
+SynthDef(\sin, {
+    |freq=220, amp=0.1|
+    var mod = ExpRand(freq/1.01, freq*1.01);
+    var noise = PinkNoise.ar * Env.perc(0.001, 0.05).ar() * amp*0.5;
+    Out.ar(0, SinOsc.ar(mod!2) * Env.perc.ar(doneAction:2) * amp + noise) }
+).add;
+
+SynthDef(\impulse, {
+    | amp=0.1 |
+    Env([0, 0], [0.001]).ar(doneAction:2);
+    OffsetOut.ar(0, Impulse.ar(0!2) * amp) }
+).add;
+)
+
 // some default patterns
 (
 ~patterns = [
@@ -46,16 +59,18 @@ The top two buttons allow you to switch between the pattern editor page and the 
 // keep track of actively playing patterns
 ~active = nil!48;
 
+// this is what happens whenever a step is triggered
 ~eventHandler = {
     | note, idx |
-    Synth(\sin, [freq: note.midicps]);
+    Synth(\impulse, [freq: note.midicps]);
 };
 
 OSCdef(\pad, {
     | msg |
     // latency is only converted to beats when a pattern is launched, so the actual
     // latency will vary with tempo for any active patterns. This should only affect
-    // the look-ahead time though, not the actual scheduled note time
+    // the look-ahead time though, not the actual scheduled note time. If your
+    // event sends MIDI instead of triggering SC synths, set the latency to 0
     var latency = 0.05; // how far in advance to schedule step events, in seconds
     var stepdur = 0.25; // beats
     var padnum = msg[1];
@@ -96,6 +111,24 @@ OSCdef(\pad, {
         }.fork;
     };
 }, '/manta/continuous/pad', recvPort: ~defaultRecvPort);
+
+~lastSliderValue = [nil, nil];
+OSCdef(\slider, {
+    | msg |
+    var id = msg[1];
+    var value = if(msg[2] == 65535, nil, msg[2]);
+    if(~lastSliderValue[id].notNil && value.notNil, {
+        if(id == 0, {
+            var diff = value - ~lastSliderValue[id];
+            var mult = diff.linexp(-4096, 4096, 0.5, 2);
+            TempoClock.default.tempo = TempoClock.default.tempo * mult;
+            TempoClock.default.tempo.postln;
+        })
+    });
+
+    ~lastSliderValue[id] = value;
+}, '/manta/continuous/slider', recvPort: ~defaultRecvPort);
 )
 
 TempoClock.default.tempo = 2
+thisThread
