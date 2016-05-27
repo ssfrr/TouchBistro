@@ -121,10 +121,20 @@ var launchPattern = {
         },
         setleds: {
             | self, step |
-            if(self.pattern.steps[step] != 0) {
+            var row = padnum.div(8);
+            var steps = self.pattern.steps[0..(self.pattern.len-1)];
+            if(steps.wrapAt(step) != 0) {
                 // if the current step is active, make it red
                 activeleds[1][self.padnum] = activeleds[1][self.padnum] + 1;
                 self.activeleds[1] = self.activeleds[1].add(self.padnum);
+            };
+            6.do {
+                | i |
+                if(steps.wrapAt(step+(i-row)) != 0, {
+                    var ledidx = self.padnum + ((i-row)*8);
+                    activeleds[0][ledidx] = activeleds[0][ledidx] + 1;
+                    self.activeleds[0] = self.activeleds[0].add(ledidx);
+                });
             }
         }
     );
@@ -195,3 +205,6 @@ OSCdef(\slider, {
     ~lastSliderValue[id] = value;
 }, '/manta/continuous/slider', recvPort: ~defaultRecvPort);
 )
+
+a = [1, 2, 3, 4, 5]
+a.wrapAt(-2)
