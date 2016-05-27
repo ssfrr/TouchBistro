@@ -2,8 +2,6 @@ s.boot
 s.quit
 
 (
-
-
 OSCdef(\button, {
     | msg |
     msg.postln;
@@ -22,9 +20,7 @@ Touch Bistro allows you to perform different repeating rhythmic patterns with di
 The top two buttons allow you to switch between the pattern editor page and the performance page. The performance page is the default starting page and is where you actually control the patterns. The pattern editor page allows you to edit the pattern by adding or removing steps with a quick tap, or change the length by holding the last pad in the pattern for more than half a second (so patterns can be from 1-8 steps long). The length of each pattern is indicated with a red LED after the last pad, so if you don't see an LED then the pattern is 8 steps long. Note that changing the length of a pattern is non-destructive, i.e. notes past the end are retained.
 */
 
-~defaultRecvPort = 31416;
-~oscSender = NetAddr("localhost", 31417);
-~oscSender.sendMsg('/manta/ledcontrol', "padandbutton", 1);
+OSCFunc.trace(true)
 
 // a synth to test with
 (
@@ -44,7 +40,9 @@ SynthDef(\impulse, {
 
 // some default patterns
 (
-~patterns = [
+var defaultRecvPort = 31416;
+var oscSender = NetAddr("localhost", 31417);
+var patterns = [
     (len: 1, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
     (len: 2, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
     (len: 3, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
@@ -54,65 +52,134 @@ SynthDef(\impulse, {
 ];
 
 // default the notes to a major scale
-~notes = [0, 2, 4, 5, 7, 9, 11, 12] + 65;
+var notes = [0, 2, 4, 5, 7, 9, 11, 12] + 65;
 
 // keep track of actively playing patterns
-~active = nil!48;
+var activepatterns = nil!48;
 
-// this is what happens whenever a step is triggered
-~eventHandler = {
-    | note, idx |
-    Synth(\impulse, [freq: note.midicps]);
+// count of how many active patterns want different pads to be amber and red
+var activeleds = [0!48, 0!48];
+
+var clearpadleds = {
+    oscSender.sendMsg('/manta/led/pad/frame', "off", Int8Array[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0]);
 };
 
-OSCdef(\pad, {
-    | msg |
+var drawactive = {
+    clearpadleds.value;
+    [[activeleds[0], "amber"], [activeleds[1], "red"]].do {
+        | colorinfo |
+        var pads = colorinfo[0];
+        var colorstring = colorinfo[1];
+        // we need to zero-pad to a multiple of 4 entries because supercollider doesn't
+        // zero-pad properly. Luckily MantaOSC ignores extra data
+        var mask = Int8Array[0, 0, 0, 0, 0, 0, 0, 0];
+        48.do {
+            | padnum |
+            if(pads[padnum] > 0, {
+                var row = padnum.div(8);
+                var column = padnum.mod(8);
+                mask[row] = mask[row] | (0x80 >> column);
+            })
+        };
+        oscSender.sendMsg('/manta/led/pad/frame', colorstring, mask);
+    }
+};
+
+// this is what happens whenever a step is triggered
+var eventHandler = {
+    | note, idx |
+    Synth(\sin, [freq: note.midicps]);
+};
+
+var lastSliderValue = [nil, nil];
+
+var launchPattern = {
+    | padnum, stepdur=0.25, latency=0.05 |
+    // stepdur is in beats
+    // latency is how far in advance to schedule step events, in seconds
     // latency is only converted to beats when a pattern is launched, so the actual
     // latency will vary with tempo for any active patterns. This should only affect
     // the look-ahead time though, not the actual scheduled note time. If your
     // event sends MIDI instead of triggering SC synths, set the latency to 0
-    var latency = 0.05; // how far in advance to schedule step events, in seconds
-    var stepdur = 0.25; // beats
-    var padnum = msg[1];
-    // map pad row and column to pattern and note selection, respectively
-    var pattern = ~patterns[padnum.div(8)];
-    var noteidx = padnum.mod(8);
-    var note = ~notes[noteidx];
-    var value = msg[2];
-    case { value == 0 && ~active[padnum].notNil}  {
-        ~active[padnum].stop;
-        ~active[padnum] = nil;
-    } { value > 0 && ~active[padnum].isNil} {
-        ~active[padnum] = {
-            // note that we're explicitly using a step index here rather than `do` iteration
-            // so that we can check if the length changes at every step.
-            // initialize step to be the 2nd step of the sequence, which is 0 if we have a 1-length
-            // pattern
-            var step = if(pattern.len == 1, 0, 1);
-            // play the first step immediately so there's no perceptual latency
-            if(pattern.steps[0] != 0, {
-                ~eventHandler.value(note, noteidx);
-            });
-            (stepdur-(latency/thisThread.clock.beatDur)).wait;
-            {
-                if(pattern.steps[step] != 0, {
-                    // we're executing slightly before the time we want the step to run, so
-                    // bundle all the OSC messages and schedule them into the future
-                    s.makeBundle(latency, {
-                        ~eventHandler.value(note, noteidx);
-                    });
-                });
-                stepdur.wait;
-                step = step + 1;
-                if(step >= pattern.len, {
-                    step = 0;
-                });
-            }.loop;
-        }.fork;
-    };
-}, '/manta/continuous/pad', recvPort: ~defaultRecvPort);
 
-~lastSliderValue = [nil, nil];
+    // map pad row and column to pattern and note selection, respectively
+    var noteidx = padnum.mod(8);
+    var instance = (
+        activeleds: [[], []],
+        pattern: patterns[padnum.div(8)],
+        padnum: padnum,
+        clearleds: {
+            | self |
+            self.activeleds.do {
+                | colorpads, idx |
+                colorpads.do {
+                    | padnum |
+                    activeleds[idx][padnum] = activeleds[idx][padnum] - 1;
+                }
+            };
+            self.activeleds = [[], []];
+        },
+        setleds: {
+            | self, step |
+            if(self.pattern.steps[step] != 0) {
+                // if the current step is active, make it red
+                activeleds[1][self.padnum] = activeleds[1][self.padnum] + 1;
+                self.activeleds[1] = self.activeleds[1].add(self.padnum);
+            }
+        }
+    );
+
+    instance.routine = {
+        // note that we're explicitly using a step index here rather than `do` iteration
+        // so that we can check if the length changes at every step.
+        // initialize step to be the 2nd step of the sequence, which is 0 if we have a 1-length
+        // pattern
+        var step = if(instance.pattern.len == 1, 0, 1);
+        // play the first step immediately so there's no perceptual latency
+        if(instance.pattern.steps[0] != 0, {
+            eventHandler.value(notes[noteidx], noteidx);
+        });
+        instance.setleds(0);
+        drawactive.value;
+        (stepdur-(latency/thisThread.clock.beatDur)).wait;
+        {
+            if(instance.pattern.steps[step] != 0, {
+                // we're executing slightly before the time we want the step to run, so
+                // bundle all the OSC messages and schedule them into the future
+                s.makeBundle(latency, {
+                    eventHandler.value(notes[noteidx], noteidx);
+                });
+            });
+            instance.clearleds;
+            instance.setleds(step);
+            drawactive.value;
+            stepdur.wait;
+            step = step + 1;
+            if(step >= instance.pattern.len, {
+                step = 0;
+            });
+        }.loop;
+    }.fork;
+
+    instance
+};
+
+oscSender.sendMsg('/manta/ledcontrol', "padandbutton", 1);
+
+OSCdef(\pad, {
+    | msg |
+    var padnum = msg[1];
+    var value = msg[2];
+    case { value == 0 && activepatterns[padnum].notNil}  {
+        activepatterns[padnum].clearleds;
+        drawactive.value;
+        activepatterns[padnum].routine.stop;
+        activepatterns[padnum] = nil;
+    } { value > 0 && activepatterns[padnum].isNil} {
+        activepatterns[padnum] = launchPattern.value(padnum);
+    };
+}, '/manta/continuous/pad', recvPort: defaultRecvPort);
+
 OSCdef(\slider, {
     | msg |
     var id = msg[1];
@@ -122,13 +189,9 @@ OSCdef(\slider, {
             var diff = value - ~lastSliderValue[id];
             var mult = diff.linexp(-4096, 4096, 0.5, 2);
             TempoClock.default.tempo = TempoClock.default.tempo * mult;
-            TempoClock.default.tempo.postln;
         })
     });
 
     ~lastSliderValue[id] = value;
 }, '/manta/continuous/slider', recvPort: ~defaultRecvPort);
 )
-
-TempoClock.default.tempo = 2
-thisThread
