@@ -20,7 +20,25 @@ Touch Bistro allows you to perform different repeating rhythmic patterns with di
 The top two buttons allow you to switch between the pattern editor page and the performance page. The performance page is the default starting page and is where you actually control the patterns. The pattern editor page allows you to edit the pattern by adding or removing steps with a quick tap, or change the length by holding the last pad in the pattern for more than half a second (so patterns can be from 1-8 steps long). The length of each pattern is indicated with a red LED after the last pad, so if you don't see an LED then the pattern is 8 steps long. Note that changing the length of a pattern is non-destructive, i.e. notes past the end are retained.
 */
 
-OSCFunc.trace(true)
+OSCFunc.trace(true);
+// This is just some Manta LED Testing code
+(
+{
+    var addr = NetAddr("localhost", 31417);
+    var del = 0.02;
+    OSCFunc.trace(true);
+    addr.sendMsg('/manta/ledcontrol', "padandbutton", 1);
+    {
+        addr.sendMsg('/manta/led/pad/frame', "off", Int8Array[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0]);
+        del.wait;
+        48.do {
+            | pad |
+            addr.sendMsg('/manta/led/pad', "amber", pad);
+            del.wait;
+        }
+    }.loop;
+}.fork;
+)
 
 // a synth to test with
 (
@@ -205,6 +223,3 @@ OSCdef(\slider, {
     ~lastSliderValue[id] = value;
 }, '/manta/continuous/slider', recvPort: ~defaultRecvPort);
 )
-
-a = [1, 2, 3, 4, 5]
-a.wrapAt(-2)
