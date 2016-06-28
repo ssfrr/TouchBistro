@@ -19,6 +19,7 @@ TouchBistro {
     var notes;
     var activepatterns;
     var activeleds;
+    var <>latency = 0.05;
 
     *new {
         | server |
@@ -52,7 +53,7 @@ TouchBistro {
                 activepatterns[idx].stop;
                 activepatterns[idx] = nil;
             } { value > 0 && activepatterns[idx].isNil} {
-                activepatterns[idx] = PatternInstance(server, patternData, notes, row, column, performancePage, eventHandler);
+                activepatterns[idx] = PatternInstance(server, patternData, notes, row, column, performancePage, eventHandler, latency);
             };
 
             manta.onSliderAccum = {
@@ -74,19 +75,19 @@ PatternInstance {
     var noteIdx;
     var page;
     var eventHandler;
-    var activeLeds;
-    var routine;
-    const stepdur=0.25; // in beats
     // latency is how far in advance to schedule step events, in seconds
     // latency is only converted to beats when a pattern is launched, so the actual
     // latency will vary with tempo for any active patterns. This should only affect
     // the look-ahead time though, not the actual scheduled note time. If your
     // event sends MIDI instead of triggering SC synths, set the latency to 0
-    const latency=0.05;
+    var latency;
+    var activeLeds;
+    var routine;
+    const stepdur=0.25; // in beats, i.e. quarter notes
 
     *new {
-        | server, patternData, noteData, pattern, note, page, eventHandler |
-        var instance = super.newCopyArgs(server, patternData, noteData, pattern, note, page, eventHandler);
+        | server, patternData, noteData, pattern, note, page, eventHandler, latency |
+        var instance = super.newCopyArgs(server, patternData, noteData, pattern, note, page, eventHandler, latency);
         instance.init;
         ^instance;
     }
@@ -104,19 +105,27 @@ PatternInstance {
         var pattern = patternData[patternIdx];
         var step = if(pattern.len == 1, 0, 1);
         // play the first step immediately so there's no perceptual latency
+        // TODO: we probably want to fork the event handler in case the user puts any waits in it
         if(pattern.steps[0] != 0, {
             eventHandler.value(noteData[noteIdx], noteIdx);
         });
         this.setLeds(0);
         page.draw(); // THIS WILL HAVE TO CHANGE WHEN WE SUPPORT MULTIPLE PAGES
+        // the first time we delay somewhat less than the step size to accomodate the schedule-ahead
+        // latency
         (stepdur-(latency/thisThread.clock.beatDur)).wait;
         {
             if(pattern.steps[step] != 0, {
-                // we're executing slightly before the time we want the step to run, so
-                // bundle all the OSC messages and schedule them into the future
-                server.makeBundle(latency, {
+                if(latency > 0, {
+                    // we're executing slightly before the time we want the step to run, so
+                    // bundle all the OSC messages and schedule them into the future
+                    server.makeBundle(latency, {
+                        eventHandler.value(noteData[noteIdx], noteIdx);
+                    });
+                }, {
+                    // just run the event handler without bundling
                     eventHandler.value(noteData[noteIdx], noteIdx);
-                });
+                })
             });
             this.clearLeds();
             this.setLeds(step);
