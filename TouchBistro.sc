@@ -55,12 +55,17 @@ TouchBistro {
             } { value > 0 && activepatterns[idx].isNil} {
                 activepatterns[idx] = PatternInstance(server, patternData, notes, row, column, performancePage, eventHandler, latency);
             };
+        };
 
-            manta.onSliderAccum = {
-                | id, value |
-                if(id == 0, { TempoClock.default.tempo = 2**value; });
-            }
-        }
+        manta.onSliderAccum = {
+            | id, value |
+            if(id == 0, { TempoClock.default.tempo = 2**value; });
+        };
+    }
+
+    // it's up to the user to periodically call this draw method to update the display
+    draw {
+        manta.draw;
     }
 }
 
@@ -110,7 +115,6 @@ PatternInstance {
             eventHandler.value(noteData[noteIdx], noteIdx);
         });
         this.setLeds(0);
-        page.draw(); // THIS WILL HAVE TO CHANGE WHEN WE SUPPORT MULTIPLE PAGES
         // the first time we delay somewhat less than the step size to accomodate the schedule-ahead
         // latency
         (stepdur-(latency/thisThread.clock.beatDur)).wait;
@@ -129,7 +133,6 @@ PatternInstance {
             });
             this.clearLeds();
             this.setLeds(step);
-            page.draw();
             stepdur.wait;
             step = step + 1;
             if(step >= pattern.len, {
@@ -141,7 +144,6 @@ PatternInstance {
     stop {
         routine.stop;
         this.clearLeds();
-        page.draw();
     }
 
     // set the LEDs to indicate the pattern state, given the current step
