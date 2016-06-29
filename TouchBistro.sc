@@ -15,11 +15,14 @@ TouchBistro {
     var >eventHandler;
     var manta;
     var performancePage;
+    var notePage;
     var patternData;
-    var notes;
+    var noteIntervals;
+    var noteOffset;
     var activepatterns;
     var activeleds;
     var <>latency = 0.05;
+    var toggleMode = false;
 
     *new {
         | server |
@@ -29,8 +32,14 @@ TouchBistro {
     }
 
     init {
+        // default to major scale
+        noteIntervals = [0, 2, 2, 1, 2, 2, 2, 1];
+        // noteOffset is a reference because it's shared between the active patterns, and we can update
+        // it on the fly
+        noteOffset = `65;
         manta = MantaOSC();
         performancePage = manta.newPage;
+        notePage = manta.newPage;
         manta.enableLedControl;
         // some default patterns
         patternData = [
@@ -41,26 +50,43 @@ TouchBistro {
             (len: 3, steps: [1, 0, 1, 0, 0, 0, 0, 0]),
             (len: 8, steps: [1, 0, 0, 1, 1, 1, 0, 1])
         ];
-        // default the notes to a major scale
-        notes = [0, 2, 4, 5, 7, 9, 11, 12] + 65;
         // keep track of actively playing patterns
         activepatterns = nil!48;
 
         performancePage.onPadVelocity = {
             | row, column, value |
             var idx = row*8+column;
-            case { value == 0 && activepatterns[idx].notNil}  {
-                activepatterns[idx].stop;
-                activepatterns[idx] = nil;
-            } { value > 0 && activepatterns[idx].isNil} {
-                activepatterns[idx] = PatternInstance(server, patternData, notes, row, column, performancePage, eventHandler, latency);
+            var action = nil;
+            case {value > 0 && activepatterns[idx].isNil} {
+                action = \create;
+            } {toggleMode && (value > 0) && activepatterns[idx].notNil} {
+                action = \destroy;
+            } { toggleMode.not && (value == 0) && activepatterns[idx].notNil} {
+                action = \destroy;
             };
+
+            switch(action,
+                \create, {
+                    activepatterns[idx] = PatternInstance(server, patternData, row, noteIntervals, noteOffset, column, performancePage, eventHandler, latency);
+                },
+                \destroy, {
+                    activepatterns[idx].stop;
+                    activepatterns[idx] = nil;
+                }
+            )
         };
 
         manta.onSliderAccum = {
             | id, value |
             if(id == 0, { TempoClock.default.tempo = 2**value; });
         };
+        manta.onButtonVelocity = {
+            | id, value |
+            if(id == 1 && (value > 0), {
+                toggleMode = toggleMode.not;
+                // TODO: set button LED
+            });
+        }
     }
 
     // it's up to the user to periodically call this draw method to update the display
@@ -75,8 +101,9 @@ PatternInstance {
     // this is a reference to the shared pattern data, which can change
     // while the pattern is running.
     var patternData;
-    var noteData;
     var patternIdx;
+    var noteIntervals;
+    var noteOffset;
     var noteIdx;
     var page;
     var eventHandler;
@@ -91,8 +118,10 @@ PatternInstance {
     const stepdur=0.25; // in beats, i.e. quarter notes
 
     *new {
-        | server, patternData, noteData, pattern, note, page, eventHandler, latency |
-        var instance = super.newCopyArgs(server, patternData, noteData, pattern, note, page, eventHandler, latency);
+        | server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency |
+        // NOTE: very well could be ordering problems here as this hasn't been tested. In progress of adding
+        // note page support here
+        var instance = super.newCopyArgs(server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency);
         instance.init;
         ^instance;
     }
@@ -100,6 +129,11 @@ PatternInstance {
     init {
         activeLeds = (amber: [], red: []);
         routine = { this.routineFunc; }.fork;
+    }
+
+    // get the correct MIDI note for this pattern
+    note {
+        ^(noteIntervals.integrate[noteIdx] + noteOffset.value);
     }
 
     routineFunc {
@@ -112,7 +146,7 @@ PatternInstance {
         // play the first step immediately so there's no perceptual latency
         // TODO: we probably want to fork the event handler in case the user puts any waits in it
         if(pattern.steps[0] != 0, {
-            eventHandler.value(noteData[noteIdx], noteIdx);
+            eventHandler.value(this.note, noteIdx);
         });
         this.setLeds(0);
         // the first time we delay somewhat less than the step size to accomodate the schedule-ahead
@@ -124,11 +158,11 @@ PatternInstance {
                     // we're executing slightly before the time we want the step to run, so
                     // bundle all the OSC messages and schedule them into the future
                     server.makeBundle(latency, {
-                        eventHandler.value(noteData[noteIdx], noteIdx);
+                        eventHandler.value(this.note, noteIdx);
                     });
                 }, {
                     // just run the event handler without bundling
-                    eventHandler.value(noteData[noteIdx], noteIdx);
+                    eventHandler.value(this.note, noteIdx);
                 })
             });
             this.clearLeds();
