@@ -63,6 +63,22 @@ TouchBistro {
             }
         };
 
+        patternPage.onPadVelocity = {
+            | row, column, value |
+            if(value > 0, {
+                var pattern = patternData[row];
+                if(pattern.steps[column] > 0, {
+                    // turn the step off
+                    patternPage.clearPad(row, column, \amber);
+                    pattern.steps[column] = 0;
+                }, {
+                    // turn the step on
+                    patternPage.setPad(row, column, \amber);
+                    pattern.steps[column] = 1;
+                });
+            });
+        };
+
         // setup the notes page
 
         noteIntervals[1..].do {
