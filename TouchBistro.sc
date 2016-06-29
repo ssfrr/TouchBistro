@@ -41,6 +41,21 @@ TouchBistro {
         performancePage = manta.newPage;
         notePage = manta.newPage;
         manta.enableLedControl;
+
+        // setup the notes page
+
+        noteIntervals[1..].do {
+            | interval, idx |
+            notePage.setPad(interval-1, idx);
+        };
+        notePage.onPadVelocity = {
+            | row, column, value |
+            if(value > 0 && (column <= 6), {
+                notePage.clearPad(noteIntervals[column+1]-1, column);
+                noteIntervals[column+1] = row+1;
+                notePage.setPad(row, column);
+            })
+        };
         // some default patterns
         patternData = [
             (len: 1, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
