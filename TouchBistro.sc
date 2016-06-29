@@ -24,6 +24,9 @@ TouchBistro {
     var activeleds;
     var <>latency = 0.05;
     var toggleMode = false;
+    // this is used to track double-taps
+    var lastStepToggled;
+    var lastStepToggledTime;
 
     *new {
         | server |
@@ -67,6 +70,7 @@ TouchBistro {
             | row, column, value |
             if(value > 0, {
                 var pattern = patternData[row];
+                var thisTime = thisThread.clock.seconds;
                 if(pattern.steps[column] > 0, {
                     // turn the step off
                     patternPage.clearPad(row, column, \amber);
@@ -76,6 +80,16 @@ TouchBistro {
                     patternPage.setPad(row, column, \amber);
                     pattern.steps[column] = 1;
                 });
+                if(lastStepToggled == [row, column], {
+                    if((thisTime - lastStepToggledTime) < 0.2, {
+                        // we have a double-tap, set the length.
+                        if(pattern.len < 8, { patternPage.clearPad(row, pattern.len, \red); });
+                        pattern.len = column+1;
+                        if(pattern.len < 8, { patternPage.setPad(row, pattern.len, \red); });
+                    });
+                });
+                lastStepToggled = [row, column];
+                lastStepToggledTime = thisTime;
             });
         };
 
