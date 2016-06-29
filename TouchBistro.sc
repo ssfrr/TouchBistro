@@ -15,6 +15,7 @@ TouchBistro {
     var >eventHandler;
     var manta;
     var performancePage;
+    var patternPage;
     var notePage;
     var patternData;
     var noteIntervals;
@@ -34,13 +35,33 @@ TouchBistro {
     init {
         // default to major scale
         noteIntervals = [0, 2, 2, 1, 2, 2, 2, 1];
+        // some default patterns
+        patternData = [
+            (len: 1, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
+            (len: 2, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
+            (len: 3, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
+            (len: 4, steps: [1, 1, 0, 1, 0, 0, 0, 0]),
+            (len: 3, steps: [1, 0, 1, 0, 0, 0, 0, 0]),
+            (len: 8, steps: [1, 0, 0, 1, 1, 1, 0, 1])
+        ];
         // noteOffset is a reference because it's shared between the active patterns, and we can update
         // it on the fly
         noteOffset = `65;
         manta = MantaOSC();
         performancePage = manta.newPage;
+        patternPage = manta.newPage;
         notePage = manta.newPage;
         manta.enableLedControl;
+
+        // setup the pattern page
+        patternData.do {
+            | pattern, patIdx |
+            if(pattern.len < 8, { patternPage.setPad(patIdx, pattern.len, \red); });
+            pattern.steps.do {
+                | step, stepIdx |
+                if(step > 0, { patternPage.setPad(patIdx, stepIdx, \amber); });
+            }
+        };
 
         // setup the notes page
 
@@ -56,15 +77,6 @@ TouchBistro {
                 notePage.setPad(row, column);
             })
         };
-        // some default patterns
-        patternData = [
-            (len: 1, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
-            (len: 2, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
-            (len: 3, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
-            (len: 4, steps: [1, 1, 0, 1, 0, 0, 0, 0]),
-            (len: 3, steps: [1, 0, 1, 0, 0, 0, 0, 0]),
-            (len: 8, steps: [1, 0, 0, 1, 1, 1, 0, 1])
-        ];
         // keep track of actively playing patterns
         activepatterns = nil!48;
 
