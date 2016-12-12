@@ -43,14 +43,15 @@ TouchBistro {
             (len: 1, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
             (len: 2, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
             (len: 3, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
-            (len: 4, steps: [1, 1, 0, 1, 0, 0, 0, 0]),
+            (len: 4, steps: [1, 0, 0, 0, 0, 0, 0, 0]),
             (len: 3, steps: [1, 0, 1, 0, 0, 0, 0, 0]),
             (len: 8, steps: [1, 0, 0, 1, 1, 1, 0, 1])
         ];
-        // noteOffset is a reference because it's shared between the active patterns, and we can update
-        // it on the fly
+        // noteOffset is a reference (backtick) because it's shared between the active
+        // patterns, and we can update it on the fly
         noteOffset = `65;
         manta = MantaOSC();
+        manta.debug = false;
         performancePage = manta.newPage;
         patternPage = manta.newPage;
         notePage = manta.newPage;
@@ -124,13 +125,21 @@ TouchBistro {
 
             switch(action,
                 \create, {
-                    activepatterns[idx] = PatternInstance(server, patternData, row, noteIntervals, noteOffset, column, performancePage, eventHandler, latency);
+                    activepatterns[idx] = PatternInstance(server, patternData, row, noteIntervals, noteOffset, column, performancePage, eventHandler, latency, value);
                 },
                 \destroy, {
                     activepatterns[idx].stop;
                     activepatterns[idx] = nil;
                 }
             )
+        };
+
+        performancePage.onPadValue = {
+            | row, column, value |
+            var idx = row*8+column;
+            if(activepatterns[idx].notNil, {
+                activepatterns[idx].velocity = value;
+            });
         };
 
         manta.onSliderAccum = {
@@ -170,15 +179,16 @@ PatternInstance {
     // the look-ahead time though, not the actual scheduled note time. If your
     // event sends MIDI instead of triggering SC synths, set the latency to 0
     var latency;
+    var >velocity = 0.0;
     var activeLeds;
     var routine;
     const stepdur=0.25; // in beats, i.e. quarter notes
 
     *new {
-        | server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency |
+        | server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency, velocity |
         // NOTE: very well could be ordering problems here as this hasn't been tested. In progress of adding
         // note page support here
-        var instance = super.newCopyArgs(server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency);
+        var instance = super.newCopyArgs(server, patternData, patternIdx, noteIntervals, noteOffset, noteIdx, page, eventHandler, latency, velocity);
         instance.init;
         ^instance;
     }
@@ -203,7 +213,7 @@ PatternInstance {
         // play the first step immediately so there's no perceptual latency
         // TODO: we probably want to fork the event handler in case the user puts any waits in it
         if(pattern.steps[0] != 0, {
-            eventHandler.value(this.note, noteIdx);
+            eventHandler.value(this.note, noteIdx, velocity);
         });
         this.setLeds(0);
         // the first time we delay somewhat less than the step size to accomodate the schedule-ahead
@@ -215,11 +225,11 @@ PatternInstance {
                     // we're executing slightly before the time we want the step to run, so
                     // bundle all the OSC messages and schedule them into the future
                     server.makeBundle(latency, {
-                        eventHandler.value(this.note, noteIdx);
+                        eventHandler.value(this.note, noteIdx, velocity);
                     });
                 }, {
                     // just run the event handler without bundling
-                    eventHandler.value(this.note, noteIdx);
+                    eventHandler.value(this.note, noteIdx, velocity);
                 })
             });
             this.clearLeds();
