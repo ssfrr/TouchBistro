@@ -11,9 +11,9 @@ The top two buttons allow you to switch between the pattern editor page and the 
 */
 
 TouchBistro {
+    var manta;
     var server;
     var >eventHandler;
-    var manta;
     var performancePage;
     var patternPage;
     var notePage;
@@ -29,10 +29,10 @@ TouchBistro {
     var lastStepToggledTime;
 
     *new {
-        | server |
-        var instance = super.newCopyArgs(server);
-        instance.init;
-        ^instance;
+        | manta, server |
+        server.isNil.if { server = Server.default };
+        manta.isNil.if { manta = MantaCLI(\osc) };
+        ^super.newCopyArgs(manta, server).init;
     }
 
     init {
@@ -50,7 +50,6 @@ TouchBistro {
         // noteOffset is a reference (backtick) because it's shared between the active
         // patterns, and we can update it on the fly
         noteOffset = `65;
-        manta = MantaOSC();
         manta.debug = false;
         performancePage = manta.newPage;
         patternPage = manta.newPage;
@@ -60,33 +59,33 @@ TouchBistro {
         // setup the pattern page
         patternData.do {
             | pattern, patIdx |
-            if(pattern.len < 8, { patternPage.setPad(patIdx, pattern.len, \red); });
+            if(pattern.len < 8, { patternPage.setPadByRowCol(patIdx, pattern.len, \red); });
             pattern.steps.do {
                 | step, stepIdx |
-                if(step > 0, { patternPage.setPad(patIdx, stepIdx, \amber); });
+                if(step > 0, { patternPage.setPadByRowCol(patIdx, stepIdx, \amber); });
             }
         };
 
         patternPage.onPadVelocity = {
-            | row, column, value |
+            | index, value, row, column |
             if(value > 0, {
                 var pattern = patternData[row];
                 var thisTime = thisThread.clock.seconds;
                 if(pattern.steps[column] > 0, {
                     // turn the step off
-                    patternPage.clearPad(row, column, \amber);
+                    patternPage.clearPadByRowCol(row, column, \amber);
                     pattern.steps[column] = 0;
                 }, {
                     // turn the step on
-                    patternPage.setPad(row, column, \amber);
+                    patternPage.setPadByRowCol(row, column, \amber);
                     pattern.steps[column] = 1;
                 });
                 if(lastStepToggled == [row, column], {
                     if((thisTime - lastStepToggledTime) < 0.2, {
                         // we have a double-tap, set the length.
-                        if(pattern.len < 8, { patternPage.clearPad(row, pattern.len, \red); });
+                        if(pattern.len < 8, { patternPage.clearPadByRowCol(row, pattern.len, \red); });
                         pattern.len = column+1;
-                        if(pattern.len < 8, { patternPage.setPad(row, pattern.len, \red); });
+                        if(pattern.len < 8, { patternPage.setPadByRowCol(row, pattern.len, \red); });
                     });
                 });
                 lastStepToggled = [row, column];
@@ -98,21 +97,21 @@ TouchBistro {
 
         noteIntervals[1..].do {
             | interval, idx |
-            notePage.setPad(interval-1, idx);
+            notePage.setPadByRowCol(interval-1, idx, \amber);
         };
         notePage.onPadVelocity = {
-            | row, column, value |
+            | index, value, row, column |
             if(value > 0 && (column <= 6), {
-                notePage.clearPad(noteIntervals[column+1]-1, column);
+                notePage.clearPadByRowCol(noteIntervals[column+1]-1, column);
                 noteIntervals[column+1] = row+1;
-                notePage.setPad(row, column);
+                notePage.setPadByRowCol(row, column, \amber);
             })
         };
         // keep track of actively playing patterns
         activepatterns = nil!48;
 
         performancePage.onPadVelocity = {
-            | row, column, value |
+            | index, value, row, column |
             var idx = row*8+column;
             var action = nil;
             case {value > 0 && activepatterns[idx].isNil} {
@@ -135,7 +134,7 @@ TouchBistro {
         };
 
         performancePage.onPadValue = {
-            | row, column, value |
+            | index, value, row, column |
             var idx = row*8+column;
             if(activepatterns[idx].notNil, {
                 activepatterns[idx].velocity = value;
@@ -254,14 +253,14 @@ PatternInstance {
         var steps = pattern.steps[0..(pattern.len-1)];
         if(steps.wrapAt(step) != 0) {
             // if the current step is active, make it red
-            page.setPad(patternIdx, noteIdx, \red);
+            page.setPadByRowCol(patternIdx, noteIdx, \red);
             activeLeds[\red] = activeLeds[\red].add([patternIdx, noteIdx]);
         };
         6.do {
             | i |
             if(steps.wrapAt(step+(i-patternIdx)) != 0, {
                 //var ledidx = self.padnum + ((i-row)*8);
-                page.setPad(i, noteIdx, \amber);
+                page.setPadByRowCol(i, noteIdx, \amber);
                 activeLeds[\amber] = activeLeds[\amber].add([i, noteIdx]);
             });
         }
@@ -273,7 +272,7 @@ PatternInstance {
             | color |
             activeLeds[color].do {
                 | rowcol |
-                page.clearPad(rowcol[0], rowcol[1], color);
+                page.clearPadByRowCol(rowcol[0], rowcol[1], color);
             };
             activeLeds[color] = [];
         }
