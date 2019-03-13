@@ -13,6 +13,7 @@ The top two buttons allow you to switch between the pattern editor page and the 
 TouchBistro {
     var manta;
     var server;
+    var name;
     var >eventHandler;
     var performancePage;
     var patternPage;
@@ -27,12 +28,21 @@ TouchBistro {
     // this is used to track double-taps
     var lastStepToggled;
     var lastStepToggledTime;
+    classvar instances;
 
+    *initClass {
+        instances = IdentityDictionary.new;
+    }
+
+    // the name is used as a key for the background task that updates the LEDs on the manta.
+    // This way you can re-create the TouchBistro instance multiple times without leaving
+    // dangling tasks. if multiple TouchBistro instances exist simultaneously they should
+    // be given different names.
     *new {
-        | manta, server |
+        | manta, server, name=\default |
         server.isNil.if { server = Server.default };
         manta.isNil.if { manta = MantaCLI(\osc) };
-        ^super.newCopyArgs(manta, server).init;
+        ^super.newCopyArgs(manta, server, name).init;
     }
 
     init {
@@ -151,10 +161,24 @@ TouchBistro {
                 toggleMode = toggleMode.not;
                 // TODO: set button LED
             });
-        }
+        };
+
+        // launch the manta draw routine if we haven't already launched one with this name
+        instances[name].isNil.if {
+            {
+                {
+                    // note that we pull from the instances dict every time so that if the
+                    // instance gets replaced with a new one in the future this loop will
+                    // still send the draw message.
+                    instances[name].draw;
+                    (1/30/thisThread.clock.beatDur).wait;
+                }.loop;
+            }.fork;
+        };
+
+        instances[name] = this;
     }
 
-    // it's up to the user to periodically call this draw method to update the display
     draw {
         manta.draw;
     }
